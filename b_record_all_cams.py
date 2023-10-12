@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 import threading
 import cv2
 import platform
-from synchroniser import Synchroniser
+from bedsy import Bedsy
 import queue
 
 if platform.system() == 'Windows':
@@ -40,20 +40,23 @@ class BaslerMouseRecorder():
         d = d.replace('\\', '/')
         return d
 
-    def __init__(self, vid_dir, size=(1936,1216), fps=41, ffmpeg='ffmpeg', use_synchroniser=False, synchroniser_fps=None):
-        self.use_synchroniser = use_synchroniser # switch this (True/False) to use an external synchroniser device for triggering frame captures
-        self.synchroniser_fps = float(synchroniser_fps)
+    def __init__(self, vid_dir, size=(1936,1216), fps=41, ffmpeg='ffmpeg', use_bedsy=False, bedsy_fps=None):
+        # switch this (True/False) to use BeDSy, an external bedsy device for triggering frame captures
+        self.use_bedsy = use_bedsy
+
+        self.bedsy_fps = float(bedsy_fps)
         self.size = size
         self.fps = fps
         self.total_t = 0
         self.fpre = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime()) # file prefix
         self.vid_dir = Path(BaslerMouseRecorder.replace_backslash_in_dir(vid_dir))
-        if self.use_synchroniser:
+        if self.use_bedsy:
             self.vid_dir = self.vid_dir / self.fpre
         self.set_logfile()
         self.ffmpeg_command = ffmpeg
-        self.recording = False
-        self.thread = None
+        self.manager_running = False
+        self.writers_running = False
+        self.writer_thread = None
         reset_baslers()
 
     def set_logfile(self):
@@ -71,7 +74,7 @@ class BaslerMouseRecorder():
         cam.ExposureAuto = "Off"
         cam.ExposureTime = 20000 # microseconds
         #cam.DeviceLinkThroughputLimitMode = "Off"
-        if self.use_synchroniser:
+        if self.use_bedsy:
             cam.TriggerMode.SetValue('On')
             cam.TriggerDelay.SetValue(0)
             cam.TriggerSelector.SetValue('FrameStart')
@@ -102,20 +105,20 @@ class BaslerMouseRecorder():
         return "".join(result)
 
     def start_writing_frames(self):
-        self.ready = False
-        if self.use_synchroniser:
+        self.writer_ready = False
+        if self.use_bedsy:
             self.cameras.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
         else:
             self.cameras.StartGrabbing()
         #time.sleep(3)
         first_frame = True
-        while self.recording:
-            if self.use_synchroniser:
+        while self.writers_running:
+            if self.use_bedsy:
                 if first_frame:
                     while not all([c.AcquisitionStatus.GetValue() for c in self.cameras]):
                         time.sleep(0.1)
                     first_frame = False
-                    self.ready = True
+                    self.writer_ready = True
                     self.start_t = self.logger.logWithTime("Started recording with {} Basler camera{}.".format(self.num_cams, 's' if self.num_cams>1 else ''), stdout=True)
                 grabResult = self.cameras.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
             else:
@@ -132,23 +135,22 @@ class BaslerMouseRecorder():
         self.cameras.StopGrabbing()
 
     def start_writing_frames_in_thread(self):
-        self.thread = threading.Thread(target=self.start_writing_frames, args=())
-        self.thread.daemon = True
-        self.thread.start()
+        self.writer_thread = threading.Thread(target=self.start_writing_frames, args=())
+        self.writer_thread.daemon = True
+        self.writer_thread.start()
 
     def start_recording(self):
         self.set_logfile()
         self.logger.startLogging()
         self.frame_counter_dict = dict()
         self.frames = dict()
-        rec_thread = threading.currentThread()
+        recmanager_thread = threading.currentThread()
 
-        #self.recording = True
+        #self.manager_running = True
         maxCamerasToUse = 30
 
         # Get the transport layer factory.
         self.tlFactory = pylon.TlFactory.GetInstance()
-
 
         # Get all attached devices and exit application if no device is found.
         # Rescan for 5 seconds before giving up
@@ -162,14 +164,14 @@ class BaslerMouseRecorder():
             self.logger.closeLogger()
             return 1
         try:
-            synchroniser_initialised = False
-            while getattr(rec_thread, "thread_running", True):
+            bedsy_initialised = False
+            while getattr(recmanager_thread, "thread_running", True):
                 do_rollover = False
-                self.recording = True # this flag controls the thread which grabs frames and writes them to a file
-                # start up the synchroniser
-                if self.use_synchroniser and not synchroniser_initialised:
+                self.writers_running = True # this flag controls the thread which grabs frames and writes them to a file
+                # start up the bedsy
+                if self.use_bedsy and not bedsy_initialised:
                     q = queue.Queue()
-                    synchroniser = Synchroniser(q, ["VID:PID=16C0:0483", "SER=13567420"])
+                    bedsy = Bedsy(q, ["VID:PID=16C0:0483", "SER=13567420"])
                 # Create an array of instant cameras for the found devices and avoid exceeding a maximum number of devices.
                 # Attach all Pylon Devices, make settings and create writers.
                 self.cameras = pylon.InstantCameraArray(min(len(self.devices), maxCamerasToUse))
@@ -185,11 +187,11 @@ class BaslerMouseRecorder():
                     self.logger.log("Settings:", stdout=False)
                     self.logger.log(self.get_cam_settings(cam), stdout=False)
                     self.num_cams += 1
-            #while getattr(rec_thread, "thread_running", True):
+            #while getattr(recmanager_thread, "thread_running", True):
                 #for n, cam in enumerate(self.cameras):
                 #    self.set_cam_settings(cam, n)
-                #self.recording = True
-                if self.use_synchroniser:
+                #self.writers_running = True
+                if self.use_bedsy:
                     # Make sure the filename changes for rollover logs
                     fpre_upd = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
                     vid_fname = str(self.vid_dir / (fpre_upd+'_'+serial+'_rec.avi'))
@@ -197,38 +199,38 @@ class BaslerMouseRecorder():
                 else:
                     vid_fname = str(self.vid_dir / (self.fpre+'_'+serial+'_rec.avi'))
                 pixfmt = 'gray' if cam.PixelFormat.Value=='Mono8' else ('gray12le' if cam.PixelFormat.Value=='Mono12p' else 'error')
-                if self.use_synchroniser:
-                    self.writers[serial] = r2v.FFMPEG_VideoWriter(vid_fname, self.size, fps=self.synchroniser_fps, pixfmt=pixfmt, ffmpeg_command=self.ffmpeg_command)
+                if self.use_bedsy:
+                    self.writers[serial] = r2v.FFMPEG_VideoWriter(vid_fname, self.size, fps=self.bedsy_fps, pixfmt=pixfmt, ffmpeg_command=self.ffmpeg_command)
                 else:
                     self.writers[serial] = r2v.FFMPEG_VideoWriter(vid_fname, self.size, fps=cam.ResultingFrameRate.Value, pixfmt=pixfmt, ffmpeg_command=self.ffmpeg_command)
                 self.frame_counter_dict[serial] = 0
                 # Start grabbing and writing to video file
                 self.start_writing_frames_in_thread()
-                self.logger.logWithTime("Started Recording.", stdout=True)
-                if self.use_synchroniser and not synchroniser_initialised:
-                    while not self.ready:
+                self.logger.logWithTime("Started recording.", stdout=True)
+                if self.use_bedsy and not bedsy_initialised:
+                    while not self.writer_ready:
                         pass
-                    synchroniser.start_synchroniser()
+                    bedsy.start_bedsy()
                     msg = q.get(timeout=3)
                     if "[START]" not in msg[1]:
                         while q.qsize() > 0:
                             msg = q.get()
                             if "[START]" in msg[1]:
-                                self.logger.logWithTime("Synchroniser started.")
-                                synchroniser_initialised = True
+                                self.logger.logWithTime("BeDSy started.")
+                                bedsy_initialised = True
                                 break
                     if "[START]" not in msg[1]:
-                        raise IOError("Problem with the synchroniser!")
+                        raise IOError("Problem with the BeDSy!")
                 time.sleep(1)
                 # Display current frames
                 for serial in self.serials:
                     cv2.namedWindow(f'Basler {serial}', cv2.WINDOW_NORMAL)
                     cv2.resizeWindow(f'Basler {serial}', 968, 608)
-                while getattr(rec_thread, "thread_running", True) and not do_rollover:
+                while getattr(recmanager_thread, "thread_running", True) and not do_rollover:
                     for serial in self.serials:
                         if serial in self.frames:
                             cv2.imshow(f'Basler {serial}', self.frames[serial])
-                    if self.use_synchroniser:
+                    if self.use_bedsy:
                         try:
                             # try to get a message from the queue
                             # they will be tuples:
@@ -238,11 +240,11 @@ class BaslerMouseRecorder():
                             cv2.waitKey(1)
                         else:
                             if "[STOP_ROLLOVER]" in msg[1]:
-                                self.recording = False
+                                self.writers_running = False
                                 self.end_t = time.time()
                                 self.logger.logWithTime("Recording rollover...", stdout=True)
                                 cv2.destroyAllWindows()
-                                self.thread.join()
+                                self.writer_thread.join()
                                 for writer in self.writers.values(): writer.close()
                                 self.frames = dict()
                                 frame_avg = sum([f for f in self.frame_counter_dict.values()]) / len(self.frame_counter_dict)
@@ -256,42 +258,42 @@ class BaslerMouseRecorder():
                         cv2.waitKey(750) # ms
 
         finally: # Clean up and log the fps
-            setattr(rec_thread, "thread_running", False)
-            self.recording = False
-            if self.use_synchroniser:
-                synchroniser.stop_synchroniser()
+            setattr(recmanager_thread, "thread_running", False)
+            self.manager_running = False
+            if self.use_bedsy:
+                bedsy.stop_bedsy()
                 msg = q.get(timeout=3)
                 if "[STOP_PERMANENT]" not in msg[1]:
                     while q.qsize() > 0:
                         msg = q.get()
                         if "[STOP_PERMANENT]" in msg[1]:
-                            self.logger.logWithTime("Synchroniser stopped.")
-                            synchroniser_initialised = False
+                            self.logger.logWithTime("BeDSy stopped.")
+                            bedsy_initialised = False
                             break
-            self.logger.logWithTime("Stopped Recording.", stdout=True)
+            self.logger.logWithTime("Stopped recording.", stdout=True)
             time.sleep(1)
             cv2.destroyAllWindows()
             #self.cameras.StopGrabbing()
-            if self.thread is not None and self.thread.is_alive(): self.thread.join()
-            self.thread = None
+            if self.writer_thread is not None and self.writer_thread.is_alive(): self.writer_thread.join()
+            self.writer_thread = None
             for writer in self.writers.values(): writer.close()
             frame_avg = sum([f for f in self.frame_counter_dict.values()]) / len(self.frame_counter_dict)
-            #if not self.use_synchroniser:
+            #if not self.use_bedsy:
             self.total_t = self.end_t-self.start_t
             self.logger.log("\nRecorded {} frames in about {:.2f} seconds ({}) -> about {:.2f} fps.".format(self.frame_counter_dict, self.total_t, self.logger.durationToTimeStr(self.total_t), frame_avg/(self.total_t)), stdout=True)
             self.logger.closeLogger()
         return 0
 
-    def stop_recording(self):
-        self.recording = False
-        self.recording_thread.thread_running = False
-        self.recording_thread.join()
-
     def start_recording_thread(self):
-        self.recording_thread = threading.Thread(target=self.start_recording)
-        self.recording = True
-        self.recording_thread.thread_running = True
-        self.recording_thread.start()
+        self.manager_thread = threading.Thread(target=self.start_recording)
+        self.manager_running = True
+        self.manager_thread.thread_running = True
+        self.manager_thread.start()
+
+    def stop_recording(self):
+        self.manager_running = False
+        self.manager_thread.thread_running = False
+        self.manager_thread.join()
 
 if __name__=="__main__":
     import threading

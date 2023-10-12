@@ -18,14 +18,14 @@ import time
 
 ffmpeg_command = 'C:\\Users\\Paul Mieske\\Desktop\\bmd_VidAud_hardwareTrigger_DavorVirag\\basler_gui_py\\ffmpeg\\bin\\ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
 
-# Synchroniser config
-use_synchroniser = True
-# specify synchroniser's signal frequency
-synchroniser_fps = 30
+# BeDSy config
+use_bedsy = True
+# specify BeDSy's signal frequency
+bedsy_fps = 30
 
 class rec_gui:
     def __init__(self, result_folder):# Recorder
-        #self.rec = BaslerMouseRecorder(result_folder, ffmpeg=ffmpeg_command, use_synchroniser=use_synchroniser, synchroniser_fps=synchroniser_fps)
+        #self.rec = BaslerMouseRecorder(result_folder, ffmpeg=ffmpeg_command, use_bedsy=use_bedsy, bedsy_fps=bedsy_fps)
         # GUI
         self.window = Tk()
         self.window.title("Basler Cam Mouse Recorder")
@@ -69,7 +69,7 @@ class rec_gui:
             self.lbl.configure(text="Currently recording")
             self.btn.configure(text="Stop")
             self.frame.update()
-            self.rec = BaslerMouseRecorder(self.tb.get() if len(self.tb.get())>0 else None, ffmpeg=ffmpeg_command, use_synchroniser=use_synchroniser, synchroniser_fps=synchroniser_fps)
+            self.rec = BaslerMouseRecorder(self.tb.get() if len(self.tb.get())>0 else None, ffmpeg=ffmpeg_command, use_bedsy=use_bedsy, bedsy_fps=bedsy_fps)
             #self.thread = threading.Thread(target=self.rec.start_recording, args=())
             #self.thread.thread_running = True
             #self.thread.daemon = True
