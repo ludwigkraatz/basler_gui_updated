@@ -5,6 +5,7 @@
 
 from pathlib import Path
 import time
+from datetime import datetime
 
 class Logger:
     def __init__(self, folder="."):
@@ -33,12 +34,16 @@ class Logger:
         if self.filep: self.filep.close()
     def current_time_str(self):
         t = time.time()
-        l = time.localtime()
-        return "{}.{:03d}".format(time.strftime("%H:%M:%S", l), int(round(t%1*1e3))), t
-    def durationToTimeStr(self, start, end):
-        """ Takes start and end time in seconds and gives a human readable string
-        showing the duration. """
-        c = end - start
+        #l = time.localtime()
+        #return "{}.{:03d}".format(time.strftime("%H:%M:%S", l), int(round(t%1*1e3))), t
+        return datetime.now().isoformat(), t
+    def durationToTimeStr(self, start, end=None):
+        """ Takes difference between two times, or both a start and end time, in seconds
+        and gives a human readable string showing the duration. """
+        if not end:
+            c = start
+        else:
+            c = end - start
         days = int(c // 86400)
         hours = int(c // 3600 % 24)
         minutes = int(c // 60 % 60)

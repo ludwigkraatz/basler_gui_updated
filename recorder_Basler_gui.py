@@ -16,11 +16,16 @@ import platform
 from b_record_all_cams import BaslerMouseRecorder
 import time
 
-ffmpeg_command = 'C:\\Users\\Paul Mieske\\Desktop\\work_videos\\B2_verhBeob\\Basler_Camera_Code\\ffmpeg-N-102753-gfcb80aa289-win64-gpl\\bin\\ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
+ffmpeg_command = 'C:\\Users\\Paul Mieske\\Desktop\\bmd_VidAud_hardwareTrigger_DavorVirag\\basler_gui_py\\ffmpeg\\bin\\ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
+
+# Synchroniser config
+use_synchroniser = True
+# specify synchroniser's signal frequency
+synchroniser_fps = 30
 
 class rec_gui:
     def __init__(self, result_folder):# Recorder
-        self.rec = BaslerMouseRecorder(result_folder, ffmpeg=ffmpeg_command)
+        #self.rec = BaslerMouseRecorder(result_folder, ffmpeg=ffmpeg_command, use_synchroniser=use_synchroniser, synchroniser_fps=synchroniser_fps)
         # GUI
         self.window = Tk()
         self.window.title("Basler Cam Mouse Recorder")
@@ -57,16 +62,19 @@ class rec_gui:
             self.lbl.configure(text="Currently not recording")
             self.btn.configure(text="Start")
             self.frame.update()
+            #self.thread.thread_running = False
             self.rec.stop_recording()
             time.sleep(5) # give him time to log everything
         else:
             self.lbl.configure(text="Currently recording")
             self.btn.configure(text="Stop")
             self.frame.update()
-            self.rec = BaslerMouseRecorder(self.tb.get() if len(self.tb.get())>0 else None, ffmpeg=ffmpeg_command)
-            self.thread = threading.Thread(target=self.rec.start_recording, args=())
-            self.thread.daemon = True
-            self.thread.start()
+            self.rec = BaslerMouseRecorder(self.tb.get() if len(self.tb.get())>0 else None, ffmpeg=ffmpeg_command, use_synchroniser=use_synchroniser, synchroniser_fps=synchroniser_fps)
+            #self.thread = threading.Thread(target=self.rec.start_recording, args=())
+            #self.thread.thread_running = True
+            #self.thread.daemon = True
+            #self.thread.start()
+            self.rec.start_recording_thread()
         self.frame.update() # flush all the inputs that have been made while this was executing
         self.bind_keys()
         self.btn.configure(state='normal')
