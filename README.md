@@ -72,11 +72,3 @@ Further Notes
  * We would both be happy to help with the code and see it contribute to more research.
 
 Niek June 2021, Davor Oct 2023
-
-
- * Reformatting to Markdown
- * Removed `pathlib` as a requirement as it's a part of Python's standard library (comes preinstalled with Python) since Python 3.4
- * Added a link to download `libusb-win32-devel-filter-1.2.6.0.exe` - it was originally included in a subdirectory
- * Redacted Niek's personal e-mail address
- 
- My modifications to the code itself will be published in a forked repository.
