@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 import threading
 import cv2
 import platform
-from bedsy import Bedsy
+from bedsy.bedsy import Bedsy
 import queue
 
 if platform.system() == 'Windows':
