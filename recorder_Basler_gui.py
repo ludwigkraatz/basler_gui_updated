@@ -17,13 +17,15 @@ from b_record_all_cams import BaslerMouseRecorder
 import time
 
 ffmpeg_command = 'C:\\Users\\Paul Mieske\\Desktop\\bmd_VidAud_hardwareTrigger_DavorVirag\\basler_gui_py\\ffmpeg\\bin\\ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
+#ffmpeg_command = 'C:\\Users\\Davor\\ffmpeg\\bin\\ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
+
 
 # BeDSy config
 use_bedsy = True
 # specify BeDSy's signal frequency
 bedsy_fps = 30
 
-class rec_gui:
+class Rec_gui:
     def __init__(self, result_folder):# Recorder
         #self.rec = BaslerMouseRecorder(result_folder, ffmpeg=ffmpeg_command, use_bedsy=use_bedsy, bedsy_fps=bedsy_fps)
         # GUI
@@ -88,5 +90,5 @@ class rec_gui:
     def q_pressed(self, event): self.quit_pressed()
 
 if __name__=="__main__":    
-    result_folder = "/home/niek/Videos/basler"
-    rec_gui(result_folder)
+    result_folder = "D:/Davor/testrecording"
+    rec_gui = Rec_gui(result_folder)

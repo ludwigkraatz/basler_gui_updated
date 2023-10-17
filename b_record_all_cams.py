@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 import threading
 import cv2
 import platform
-from bedsy import Bedsy
+from bedsy.bedsy import Bedsy
 import queue
 
 if platform.system() == 'Windows':
@@ -57,6 +57,7 @@ class BaslerMouseRecorder():
         self.manager_running = False
         self.writers_running = False
         self.writer_thread = None
+        self.use_dummy_camera = False
         reset_baslers()
 
     def set_logfile(self):
@@ -66,6 +67,9 @@ class BaslerMouseRecorder():
     def set_cam_settings(self, cam, i):
         cam.Attach(self.tlFactory.CreateDevice(self.devices[i]))
         cam.Open()
+        if cam.DeviceInfo.GetDeviceClass() == "BaslerCamEmu":
+            cam.RegisterConfiguration(pylon.SoftwareTriggerConfiguration(), pylon.RegistrationMode_ReplaceAll,
+                                      pylon.Cleanup_Delete)
         cam.OffsetX = 0
         cam.OffsetY = 0
         cam.Width = self.size[0]
@@ -78,7 +82,8 @@ class BaslerMouseRecorder():
             cam.TriggerMode.SetValue('On')
             cam.TriggerDelay.SetValue(0)
             cam.TriggerSelector.SetValue('FrameStart')
-            cam.TriggerSource.SetValue('Line3')
+            if cam.DeviceInfo.GetDeviceClass() != "BaslerCamEmu":
+                cam.TriggerSource.SetValue('Line3')
             cam.TriggerActivation.SetValue('RisingEdge')
             cam.AcquisitionMode.SetValue('Continuous')
             cam.AcquisitionFrameRateEnable = False
@@ -88,6 +93,9 @@ class BaslerMouseRecorder():
             cam.AcquisitionFrameRateEnable = True
             cam.AcquisitionFrameRate = 30 # the frame rate that he is trying to do
             # he estimates the actual frame rate in cam.ResultingFrameRate. Tests have shown that this is also not always accurate though - especially when using 12 bit pixels (Mono12p).
+        if cam.DeviceInfo.GetDeviceClass() == "BaslerCamEmu":
+            self.use_dummy_camera = True
+            cam.TestImageSelector.SetValue("Testimage2")
 
     def get_cam_settings(self, cam):
         result = []
@@ -101,7 +109,8 @@ class BaslerMouseRecorder():
         result.append("Throughput Limit Mode: {}\n".format(cam.DeviceLinkThroughputLimitMode.Value))
         result.append("Acquisition Frame Rate Enable: {}\n".format(cam.AcquisitionFrameRateEnable.Value))
         result.append("Acquisition Frame Rate: {}\n".format(cam.AcquisitionFrameRate.Value))
-        result.append("->Resulting Frame Rate: {}\n".format(cam.ResultingFrameRate.Value))
+        if not self.use_bedsy:
+            result.append("->Resulting Frame Rate: {}\n".format(cam.ResultingFrameRate.Value))
         return "".join(result)
 
     def start_writing_frames(self):
@@ -113,6 +122,10 @@ class BaslerMouseRecorder():
         #time.sleep(3)
         first_frame = True
         while self.writers_running:
+            if self.use_dummy_camera:
+                for c in self.cameras:
+                    if c.DeviceInfo.GetDeviceClass() == "BaslerCamEmu":
+                        c.ExecuteSoftwareTrigger()
             if self.use_bedsy:
                 if first_frame:
                     while not all([c.AcquisitionStatus.GetValue() for c in self.cameras]):
@@ -124,7 +137,7 @@ class BaslerMouseRecorder():
             else:
                 grabResult = self.cameras.RetrieveResult(500, pylon.TimeoutHandling_ThrowException)
                 self.start_t = self.logger.logWithTime("Started recording with {} Basler camera{}.".format(self.num_cams, 's' if self.num_cams>1 else ''), stdout=True)
-            serial = self.cameras[grabResult.GetCameraContext()].GetDeviceInfo().GetSerialNumber()
+            serial = self.cameras[grabResult.GetCameraContext()].DeviceInfo.GetSerialNumber()
             # Write image to video
             frame = grabResult.GetArray()
             self.frames[serial] = frame
@@ -165,13 +178,17 @@ class BaslerMouseRecorder():
             return 1
         try:
             bedsy_initialised = False
-            while getattr(recmanager_thread, "thread_running", True):
+            #print("running main loop")
+            while getattr(recmanager_thread, "thread_running"):
+                #print("running recurring loop")
                 do_rollover = False
                 self.writers_running = True # this flag controls the thread which grabs frames and writes them to a file
                 # start up the bedsy
                 if self.use_bedsy and not bedsy_initialised:
+                    #print("DEBUG", "Initializing BeDSy...")
                     q = queue.Queue()
-                    bedsy = Bedsy(q, ["VID:PID=16C0:0483", "SER=13567420"])
+                    bedsy = Bedsy(q, ["VID:PID=16C0:0483", "SER=13567420"]) # teensy 4.0                
+                    #bedsy = Bedsy(q, ["VID:PID=16C0:0483", "SER=14487510"]) # teensy 4.1
                 # Create an array of instant cameras for the found devices and avoid exceeding a maximum number of devices.
                 # Attach all Pylon Devices, make settings and create writers.
                 self.cameras = pylon.InstantCameraArray(min(len(self.devices), maxCamerasToUse))
@@ -181,52 +198,61 @@ class BaslerMouseRecorder():
                 self.num_cams = 0
                 for n, cam in enumerate(self.cameras):
                     self.set_cam_settings(cam, n)
-                    serial = cam.GetDeviceInfo().GetSerialNumber()
+                    serial = cam.DeviceInfo.GetSerialNumber()
                     self.serials.append(serial)
                     self.logger.log("Found Basler cam {} ({}).".format(serial, cam.GetDeviceInfo().GetModelName()), stdout=True)
                     self.logger.log("Settings:", stdout=False)
                     self.logger.log(self.get_cam_settings(cam), stdout=False)
                     self.num_cams += 1
-            #while getattr(recmanager_thread, "thread_running", True):
-                #for n, cam in enumerate(self.cameras):
-                #    self.set_cam_settings(cam, n)
-                #self.writers_running = True
-                if self.use_bedsy:
-                    # Make sure the filename changes for rollover logs
-                    fpre_upd = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
-                    vid_fname = str(self.vid_dir / (fpre_upd+'_'+serial+'_rec.avi'))
-                    print(vid_fname)
-                else:
-                    vid_fname = str(self.vid_dir / (self.fpre+'_'+serial+'_rec.avi'))
-                pixfmt = 'gray' if cam.PixelFormat.Value=='Mono8' else ('gray12le' if cam.PixelFormat.Value=='Mono12p' else 'error')
-                if self.use_bedsy:
-                    self.writers[serial] = r2v.FFMPEG_VideoWriter(vid_fname, self.size, fps=self.bedsy_fps, pixfmt=pixfmt, ffmpeg_command=self.ffmpeg_command)
-                else:
-                    self.writers[serial] = r2v.FFMPEG_VideoWriter(vid_fname, self.size, fps=cam.ResultingFrameRate.Value, pixfmt=pixfmt, ffmpeg_command=self.ffmpeg_command)
-                self.frame_counter_dict[serial] = 0
+                #while getattr(recmanager_thread, "thread_running", True):
+                    #for n, cam in enumerate(self.cameras):
+                    #    self.set_cam_settings(cam, n)
+                    #self.writers_running = True
+                    if self.use_bedsy:
+                        # Make sure the filename changes for rollover logs
+                        fpre_upd = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+                        vid_fname = str(self.vid_dir / (fpre_upd+'_'+serial+'_rec.avi'))
+                        print(vid_fname)
+                    else:
+                        vid_fname = str(self.vid_dir / (self.fpre+'_'+serial+'_rec.avi'))
+                    pixfmt = 'gray' if cam.PixelFormat.Value=='Mono8' else ('gray12le' if cam.PixelFormat.Value=='Mono12p' else 'error')
+                    if self.use_bedsy:
+                        self.writers[serial] = r2v.FFMPEG_VideoWriter(vid_fname, self.size, fps=self.bedsy_fps, pixfmt=pixfmt, ffmpeg_command=self.ffmpeg_command)
+                    else:
+                        self.writers[serial] = r2v.FFMPEG_VideoWriter(vid_fname, self.size, fps=cam.ResultingFrameRate.Value, pixfmt=pixfmt, ffmpeg_command=self.ffmpeg_command)
+                    self.frame_counter_dict[serial] = 0
                 # Start grabbing and writing to video file
                 self.start_writing_frames_in_thread()
                 self.logger.logWithTime("Started recording.", stdout=True)
                 if self.use_bedsy and not bedsy_initialised:
+                    #print("DEBUG","Hello")
                     while not self.writer_ready:
-                        pass
+                        time.sleep(0)
+                    #print("DEBUG", "Starting BeDSy...")
                     bedsy.start_bedsy()
+                    got_start_msg = False
                     msg = q.get(timeout=3)
+                    #print("DEBUG", msg)
                     if "[START]" not in msg[1]:
+                        #print("DEBUG", "[START] not in msg")
                         while q.qsize() > 0:
                             msg = q.get()
+                            #print("DEBUG", msg)
                             if "[START]" in msg[1]:
-                                self.logger.logWithTime("BeDSy started.")
-                                bedsy_initialised = True
                                 break
                     if "[START]" not in msg[1]:
                         raise IOError("Problem with the BeDSy!")
-                time.sleep(1)
+                    else:
+                        self.logger.logWithTime("BeDSy started.")
+                        #print("DEBUG", "BeDSy started.")
+                        bedsy_initialised = True
+                        
+                #time.sleep(1)
                 # Display current frames
                 for serial in self.serials:
                     cv2.namedWindow(f'Basler {serial}', cv2.WINDOW_NORMAL)
                     cv2.resizeWindow(f'Basler {serial}', 968, 608)
-                while getattr(recmanager_thread, "thread_running", True) and not do_rollover:
+                while getattr(recmanager_thread, "thread_running") and not do_rollover:
                     for serial in self.serials:
                         if serial in self.frames:
                             cv2.imshow(f'Basler {serial}', self.frames[serial])
@@ -258,6 +284,7 @@ class BaslerMouseRecorder():
                         cv2.waitKey(750) # ms
 
         finally: # Clean up and log the fps
+            self.writers_running = False
             setattr(recmanager_thread, "thread_running", False)
             self.manager_running = False
             if self.use_bedsy:
