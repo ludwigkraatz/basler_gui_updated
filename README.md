@@ -64,7 +64,8 @@ The BeDSy can be toggled by a [flag in `recorder_Basler_gui.py`](https://github.
    * When recording a preview window for each Basler camera will appear. It shows what the cameras record, but not in the actual framerate. The framerate in the preview window is much lower than what is recorded.
  * When a recording is finished, the given folder should contain the video file(s)
  * The program can be exited with the quit button or the key `q` or the normal `x` at the top right
-Further Notes
+
+**Further Notes**
  * Usually it will not all work on first try, because this guide has mistakes and the computer is set up differently or whatever
    * Feel free to contact Davor or Niek for assistance
    * We can also make a phone or Zoom call
