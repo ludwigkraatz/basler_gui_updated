@@ -54,9 +54,10 @@
    * When recording a preview window for each basler camera will appear. It shows what the cameras record, but not in the actual framerate. The framerate in the preview window is much lower than what is recorded.
  * When a recording is finished, the given folder should contain the video file(s)
  * The program can be exited with the quit button or the key `q` or the normal `x` at the top right
-Further Notes
+
+**Further Notes**
  * Usually it will not all work on first try, because this guide has mistakes and the computer is set up differently or whatever
-   * I am available at [PERSONAL E-MAIL REDACTED]
+   * I am available at n.andresen@tu-berlin.de
    * We can also make a phone or Zoom call
  * The Code was written by me and you can read and adjusted it of course
  * I can also make adjustments or help with them. I would be happy to see it contribute to more research.
