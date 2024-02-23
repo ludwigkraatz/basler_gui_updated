@@ -322,7 +322,7 @@ class BaslerMouseRecorder():
                                 self.logger.logWithTime("Recording rollover...", stdout=True)
                                 cv2.destroyAllWindows()
                                 #self.writer_thread.join()
-                                for t in self.c_threads:
+                                for t in self.c_threads.values():
                                     t.join()
                                 for writer in self.writers.values(): writer.close()
                                 self.frames = dict()
@@ -357,7 +357,7 @@ class BaslerMouseRecorder():
             #self.cameras.StopGrabbing()
             #if self.writer_thread is not None and self.writer_thread.is_alive(): self.writer_thread.join()
             #self.writer_thread = None
-            for t in self.c_threads:
+            for t in self.c_threads.values():
                 if t.is_alive():
                     t.join()
             self.end_t = time.time()
