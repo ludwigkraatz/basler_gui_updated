@@ -14,13 +14,13 @@
     Camera settings are hard coded below (in "set_cam_settings").
 """
 
+import os
 from pypylon import pylon
 from pathlib import Path
 import time
 from threading import Thread
 import cv2
 import platform
-import queue
 
 if platform.system() == 'Windows':
     from reset_USB import reset_baslers_windows as reset_baslers
@@ -32,7 +32,7 @@ import b_record_to_vid as r2v
 
 class BaslerMouseRecorder():
 
-    def replace_backslash_in_dir(self, d):
+    def replace_backslash_in_dir(d):
         d = d.replace('\\\\', '\\')
         d = d.replace('\\', '/')
         return d
@@ -46,15 +46,6 @@ class BaslerMouseRecorder():
         self.ffmpeg_command = ffmpeg
         self.running = False
         self.thread = None
-        self.c_threads = dict()
-        self.frame_counter_dict = dict()
-        self.frames = dict()
-        self.start_t = str()
-        self.devices = None
-        self.cameras = None
-        # Make the setup for each cam, log that it was found, create a writer for it etc.
-        self.writers = dict()
-        self.serials = list()
         reset_baslers()
 
     def set_logfile(self):
@@ -91,46 +82,23 @@ class BaslerMouseRecorder():
         result.append("->Resulting Frame Rate: {}\n".format(cam.ResultingFrameRate.Value))
         return "".join(result)
 
-    # def all_start_writing_frames(self):
-    #     self.cameras.StartGrabbing()
-    #     self.start_t = self.logger.logWithTime("Started recording with {} Basler camera{}.".format(self.num_cams, 's' if self.num_cams>1 else ''), stdout=True)
-    #     while self.running:
-    #         grabResult = self.cameras.RetrieveResult(500)
-    #         serial = self.cameras[grabResult.GetCameraContext()].GetDeviceInfo().GetSerialNumber()
-    #         # Write image to video
-    #         frame = grabResult.GetArray()
-    #         self.frames[serial] = frame
-    #         self.writers[serial].write_frame(frame)
-    #         grabResult.Release()
-    #         self.frame_counter_dict[serial] += 1
-
-    def cam_start_writing_frames(self, c, serial):
-        c.StartGrabbing()
-        #self.start_t = self.logger.logWithTime("Started recording with {} Basler camera{}.".format(self.num_cams, 's' if self.num_cams>1 else ''), stdout=True)
+    def start_writing_frames(self):
+        self.cameras.StartGrabbing()
+        self.start_t = self.logger.logWithTime("Started recording with {} Basler camera{}.".format(self.num_cams, 's' if self.num_cams>1 else ''), stdout=True)
         while self.running:
-            grabResult = c.RetrieveResult(500)
+            grabResult = self.cameras.RetrieveResult(500)
+            serial = self.cameras[grabResult.GetCameraContext()].GetDeviceInfo().GetSerialNumber()
             # Write image to video
             frame = grabResult.GetArray()
-            if self.frames[serial].empty():
-                self.frames[serial].put(frame)
-            #self.frames[serial] = frame
+            self.frames[serial] = frame
             self.writers[serial].write_frame(frame)
             grabResult.Release()
             self.frame_counter_dict[serial] += 1
 
-    # def all_start_writing_frames_in_thread(self):
-    #     self.thread = Thread(target=self.all_start_writing_frames, args=())
-    #     self.thread.daemon = True
-    #     self.thread.start()
-
-    def cam_start_writing_frames_in_thread(self):
-        for c in self.cameras:
-            serial = c.GetDeviceInfo().GetSerialNumber()
-            self.c_threads[serial] = Thread(target=self.cam_start_writing_frames, args=(c, serial))
-            self.c_threads[serial].daemon = True
-            self.c_threads[serial].start()
-            self.frames[serial] = queue.Queue(maxsize=1)
-        self.start_t = self.logger.logWithTime("Started recording with {} Basler camera{}.".format(self.num_cams, 's' if self.num_cams>1 else ''), stdout=True)
+    def start_writing_frames_in_thread(self):
+        self.thread = Thread(target=self.start_writing_frames, args=())
+        self.thread.daemon = True
+        self.thread.start()
 
     def start_recording(self):
         self.set_logfile()
@@ -139,7 +107,7 @@ class BaslerMouseRecorder():
         self.frames = dict()
 
         self.running = True
-        maxCamerasToUse = 6
+        maxCamerasToUse = 3
 
         # Get the transport layer factory.
         self.tlFactory = pylon.TlFactory.GetInstance()
@@ -173,7 +141,7 @@ class BaslerMouseRecorder():
                 i += 1
             self.num_cams = i
             # Start grabbing and writing to video file
-            self.cam_start_writing_frames_in_thread()
+            self.start_writing_frames_in_thread()
             self.logger.logWithTime("Started Recording.", stdout=True)
             time.sleep(1)
             # Display current frames
@@ -182,9 +150,7 @@ class BaslerMouseRecorder():
                 cv2.resizeWindow(f'Basler {serial}', 968, 608)
             while self.running:
                 for serial in self.serials:
-                    cv2.imshow(f'Basler {serial}', self.frames[serial].get(timeout=2))
-                    if not self.running:
-                        break
+                    cv2.imshow(f'Basler {serial}', self.frames[serial])
                 cv2.waitKey(750) # ms
         finally: # Clean up and log the fps
             self.running = False
@@ -192,12 +158,8 @@ class BaslerMouseRecorder():
             time.sleep(1)
             cv2.destroyAllWindows()
             self.cameras.StopGrabbing()
-            #if self.thread is not None and self.thread.is_alive(): self.thread.join()
-            #self.thread = None
-            for t in self.c_threads:
-                if t.is_alive():
-                    t.join()
-            self.c_threads = dict()
+            if self.thread is not None and self.thread.is_alive(): self.thread.join()
+            self.thread = None
             for writer in self.writers.values(): writer.close()
             frame_avg = sum([f for f in self.frame_counter_dict.values()]) / len(self.frame_counter_dict)
             self.logger.log("\nRecorded {} frames in about {:.2f} seconds ({}) -> about {:.2f} fps.".format(self.frame_counter_dict, end_t-self.start_t, self.logger.durationToTimeStr(self.start_t,end_t), frame_avg/(end_t-self.start_t)), stdout=True)
