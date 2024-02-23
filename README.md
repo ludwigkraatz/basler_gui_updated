@@ -71,6 +71,5 @@ This code is hereby uploaded in its original form under the GPLv3 license by Dav
  * Reformatting to Markdown
  * Removed `pathlib` as a requirement as it's a part of Python's standard library (comes preinstalled with Python) since Python 3.4
  * Added a link to download `libusb-win32-devel-filter-1.2.6.0.exe` - it was originally included in a subdirectory
- * Redacted Niek's personal e-mail address
  
  My modifications to the code itself will be published in a forked repository.
